@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+python-dotenv
+pydantic
+sqlalchemy
+psycopg2-binary
+alembic
+google-adk
+google-generativeai
+pandas
+numpy
+scipy
+websockets
