@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 
 app = FastAPI(
-    title="finproject Platform API",
+    title="Aegis Platform API",
     version="1.0"
 )
 
@@ -9,5 +9,5 @@ app = FastAPI(
 @app.get("/")
 def home():
     return {
-        "message": "finproject Platform Backend Running"
+        "message": "Aegis Platform Backend Running"
     }
