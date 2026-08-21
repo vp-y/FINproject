@@ -1,31 +1,9 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-.eggs/
-
-# Virtual environments
 venv/
-.venv/
-env/
-ENV/
 
-# Environment variables / secrets
 .env
-.env.*
-!.env.example
 
-# Node / frontend
+__pycache__/
+
 node_modules/
-dist/
-build/
 
-# Editor / OS
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
-
-# Logs
 *.log

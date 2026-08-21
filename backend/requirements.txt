@@ -7,7 +7,16 @@ psycopg2-binary
 alembic
 google-adk
 google-generativeai
+litellm
 pandas
 numpy
 scipy
 websockets
+yfinance
+python-multipart
+langchain
+langchain-community
+langchain-google-genai
+qdrant-client
+pymupdf
+sentence-transformers
