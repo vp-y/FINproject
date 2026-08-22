@@ -1,17 +1,22 @@
 "use client";
 
-import { useState } from "react";
-import { useAgentWebSocket } from "@/hooks/useAgentWebSocket";
-import AgentMonitor from "@/components/AgentMonitor";
-import AnalysisForm from "@/components/AnalysisForm";
-import AnalysisResult, { type AnalyzeResponse } from "@/components/AnalysisResult";
-import EvidencePanel from "@/components/EvidencePanel";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { api } from "@/lib/api";
+import { Card, EmptyState } from "@/components/ui";
+import type { PortfolioSummary } from "@/lib/types";
 
 export default function Home() {
 
-  const { events, connected, sessionId } = useAgentWebSocket();
+  const [portfolios, setPortfolios] = useState<PortfolioSummary[] | null>(null);
 
-  const [result, setResult] = useState<AnalyzeResponse | null>(null);
+  useEffect(() => {
+
+    api.get<PortfolioSummary[]>("/portfolio")
+      .then((response) => setPortfolios(response.data))
+      .catch(() => setPortfolios([]));
+
+  }, []);
 
   return (
 
@@ -24,45 +29,87 @@ export default function Home() {
               Aegis Intelligence Platform
             </h1>
             <p className="text-sm text-[var(--ink-2)]">
-              Agentic portfolio risk analysis
+              Pick a portfolio, or bring in a new one.
             </p>
           </div>
 
-          <span className="flex items-center gap-2 text-xs font-medium text-[var(--ink-2)]">
-            <span
-              className={`h-2 w-2 rounded-full ${
-                connected ? "bg-[var(--good)]" : "bg-[var(--ink-3)]"
-              }`}
-            />
-            {connected ? "Live" : "Offline"}
-          </span>
+          <Link
+            href="/onboarding"
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-ink)]"
+          >
+            + New Portfolio
+          </Link>
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-6xl gap-6 px-6 py-8 lg:grid-cols-[380px_1fr]">
+      <main className="mx-auto max-w-6xl px-6 py-8">
 
-        <div className="space-y-6">
-          <AnalysisForm
-            sessionId={sessionId}
-            connected={connected}
-            onResult={setResult}
-          />
+        {
 
-          <AgentMonitor
-            events={events}
-            connected={connected}
-          />
-        </div>
+          portfolios === null ? (
 
-        <div className="space-y-6">
-          <AnalysisResult
-            result={result}
-          />
+            <p className="text-sm text-[var(--ink-3)]">
+              Loading portfolios...
+            </p>
 
-          <EvidencePanel
-            evidence={result?.evidence ?? null}
-          />
-        </div>
+          ) : portfolios.length === 0 ? (
+
+            <Card>
+              <EmptyState>
+                No portfolios yet — click &quot;New Portfolio&quot; to bring in your holdings.
+              </EmptyState>
+            </Card>
+
+          ) : (
+
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+
+              {
+
+                portfolios.map((portfolio) => (
+
+                  <Link
+                    key={portfolio.id}
+                    href={`/dashboard/${portfolio.id}`}
+                  >
+                    <Card className="p-5 transition-colors hover:border-[var(--accent)]">
+
+                      <h2 className="text-sm font-semibold">
+                        {portfolio.name}
+                      </h2>
+
+                      <p className="mt-1 text-sm text-[var(--ink-2)]">
+                        {portfolio.holding_count} holding{portfolio.holding_count === 1 ? "" : "s"}
+                      </p>
+
+                      <p className="mt-3 text-xs text-[var(--ink-3)]">
+                        {
+                          portfolio.last_recommendation_at
+                            ? `Last analyzed ${new Date(portfolio.last_recommendation_at).toLocaleDateString()}`
+                            : "Not yet analyzed"
+                        }
+                      </p>
+
+                    </Card>
+                  </Link>
+
+                ))
+
+              }
+
+            </div>
+
+          )
+
+        }
+
+        <p className="mt-8 text-sm text-[var(--ink-3)]">
+          Looking for the free-text risk console instead?{" "}
+          <Link href="/analyze" className="text-[var(--accent)] hover:underline">
+            Open it here
+          </Link>
+          .
+        </p>
 
       </main>
 

@@ -25,6 +25,19 @@
   --serious: #ec835a;
   --critical: #d03b3b;
   --critical-soft: #fbe9e9;
+
+  /* Categorical series (sector donut, etc.) — fixed hue order, never
+     cycled or reassigned per-render. Slot 1 matches --accent (blue) on
+     purpose, so the two systems stay visually consistent. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  --series-other: #898781;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -53,6 +66,16 @@
     --serious: #ec835a;
     --critical: #e66767;
     --critical-soft: #3a1414;
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+    --series-other: #898781;
   }
 }
 

@@ -76,7 +76,7 @@ def embed_and_store(chunks, batch_size=RATE_LIMIT_BATCH):
             time.sleep(RATE_LIMIT_PAUSE_SECONDS)
 
 
-def ingest_document(path, document_name, company, document_type, year):
+def ingest_document(path, document_name, company, document_type, year, ticker=None):
     """Index + embed + store a single document — the 'automatically
     trigger RAG ingestion' step that runs right after data_pipeline
     downloads a new report."""
@@ -86,7 +86,8 @@ def ingest_document(path, document_name, company, document_type, year):
         document_name=document_name,
         company=company,
         document_type=document_type,
-        year=year
+        year=year,
+        ticker=ticker
     )
 
     embed_and_store(chunks)

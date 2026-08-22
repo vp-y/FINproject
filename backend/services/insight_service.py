@@ -3,14 +3,15 @@ from services.portfolio_service import get_holdings
 from services.risk_service import analyze_portfolio_concentration
 from rag.retriever import retrieve
 from rag.generator import generate_answer_with_sources
+from data_pipeline.company_mapper import get_company_details
 
-# Maps holding tickers to the company name used as the `company` field
-# in rag/indexer.py's metadata, so RAG search can filter to the right
-# document. Only covers companies we've actually indexed documents for.
-TICKER_TO_COMPANY = {
-    "AAPL": "Apple",
-    "NVDA": "NVIDIA"
-}
+# Previously a hardcoded {"AAPL": "Apple", "NVDA": "NVIDIA"} dict — every
+# ticker onboarded after the original two seeded holdings (see
+# data_pipeline/pipeline.py) would silently fall through it and never
+# get RAG search results. Replaced with a live yfinance lookup so this
+# scales to any ticker, and with retrieve(ticker=...) below (an exact
+# identifier match on the `ticker` metadata field rag/indexer.py now
+# attaches) rather than a fuzzy company-name match.
 
 
 def explain_portfolio_risk(portfolio_id):
@@ -38,15 +39,11 @@ def explain_portfolio_risk(portfolio_id):
 
         for ticker in risky_tickers:
 
-            company = TICKER_TO_COMPANY.get(ticker)
-
-            if not company:
-                # we don't have indexed documents for this ticker yet
-                continue
+            company_name = get_company_details(ticker).get("name") or ticker
 
             chunks = retrieve(
-                f"{company} risk factors",
-                company=company,
+                f"{company_name} risk factors",
+                ticker=ticker,
                 top_k=3
             )
 

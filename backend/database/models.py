@@ -169,3 +169,60 @@ class PortfolioRiskSnapshot(Base):
     sharpe_ratio = Column(
         Float
     )
+
+
+class PortfolioProfile(Base):
+
+    __tablename__ = "portfolio_profiles"
+
+    id = Column(Integer, primary_key=True)
+    portfolio_id = Column(Integer, ForeignKey("portfolios.id"), index=True)
+    risk_tolerance = Column(String)        # conservative | moderate | aggressive
+    investment_horizon = Column(String)    # short | medium | long
+    investment_goal = Column(String, nullable=True)
+    created_at = Column(DateTime)
+
+
+class HoldingDocument(Base):
+
+    __tablename__ = "holding_documents"
+
+    id = Column(Integer, primary_key=True)
+    holding_id = Column(Integer, ForeignKey("holdings.id"), index=True)
+    # denormalized alongside holding_id so status polling by portfolio
+    # doesn't need a join through holdings
+    portfolio_id = Column(Integer, ForeignKey("portfolios.id"), index=True)
+    ticker = Column(String)
+    company_name = Column(String, nullable=True)
+    # pending | fetching | indexing | indexed | failed | no_filing_found
+    status = Column(String)
+    document_path = Column(String, nullable=True)
+    chunk_count = Column(Integer, nullable=True)
+    error = Column(String, nullable=True)
+    updated_at = Column(DateTime)
+
+
+class PortfolioRecommendation(Base):
+
+    __tablename__ = "portfolio_recommendations"
+
+    id = Column(Integer, primary_key=True)
+    portfolio_id = Column(Integer, ForeignKey("portfolios.id"), index=True)
+    session_id = Column(String, nullable=True, index=True)
+    generated_at = Column(DateTime, index=True)
+    status = Column(String)   # completed | failed
+    summary = Column(String)  # synthesis_agent's narrative
+    payload = Column(JSON)    # full structured recommendation (weaknesses,
+                               # holding_actions, alternatives, metrics...)
+
+
+class ChatMessage(Base):
+
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True)
+    portfolio_id = Column(Integer, ForeignKey("portfolios.id"), index=True)
+    conversation_id = Column(String, index=True)
+    role = Column(String)     # user | assistant
+    content = Column(String)
+    created_at = Column(DateTime, index=True)

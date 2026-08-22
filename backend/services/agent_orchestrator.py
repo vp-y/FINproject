@@ -24,6 +24,8 @@ from analytics.risk_change import compare_risk_snapshots
 from external.evidence_merger import build_evidence_items
 from external.evidence_ranker import rank_evidence
 from data_pipeline.company_mapper import get_company_details
+from analytics.recommendation_engine import generate_recommendation
+from database.models import PortfolioRecommendation
 
 AGENTS = {
     "portfolio": portfolio_agent,
@@ -46,6 +48,16 @@ def route_request(task):
 
     if task.task_type == "scenario":
         return ["portfolio", "scenario"]
+
+    if task.task_type == "recommendation":
+        # Unreachable in practice — run_orchestration always dispatches
+        # "recommendation" tasks with a portfolio_id straight to
+        # run_recommendation_workflow before route_request is ever
+        # called. This is just a defensive fallback so route_request
+        # stays total or a portfolio_id-less recommendation task
+        # (currently never issued by any caller) degrades sensibly
+        # instead of raising a KeyError.
+        return ["portfolio", "risk", "research"]
 
     return [
         "portfolio",
@@ -306,6 +318,15 @@ async def run_orchestration(task: AgentTask, session_id: str = None):
             task.portfolio_id, task.user_query, session_id
         )
 
+    # Same special-case dispatch pattern as the risk workflow above — the
+    # recommendation workflow's own deterministic quant engine already
+    # does portfolio + risk + concentration analysis internally, so
+    # there's no reason to also run the generic per-agent loop for it.
+    if task.task_type == "recommendation" and task.portfolio_id is not None:
+        return await run_recommendation_workflow(
+            task.portfolio_id, task.user_query, session_id
+        )
+
     trace = []
 
     agent_names = route_request(task)
@@ -532,6 +553,12 @@ Rules:
   "may have contributed" — never state it "definitely caused" the
   change unless it's a directly calculated metric given above.
 - Cite which evidence supports each claim.
+- Write in plain prose paragraphs only — no markdown formatting (no #
+  headers, ** bold, | tables, or --- rules). This text is displayed as
+  plain text, not rendered markdown, so any markdown syntax would show
+  up as literal stray characters to the reader.
+- Start directly with the analysis — no preamble acknowledging these
+  instructions (e.g. don't open with "Here is a plain-prose explanation...").
 """
 
 
@@ -847,6 +874,377 @@ async def run_risk_explanation_workflow(
         "type": "final_result",
         "agent": "synthesis_agent",
         "message": "Analysis completed",
+        "data": result
+    })
+
+    return result
+
+
+def build_recommendation_prompt(user_query, recommendation_payload, ranked_evidence):
+    """Mirrors build_risk_explanation_prompt's structure: formats every
+    piece of the already-computed structured recommendation into plain
+    text, then hands the LLM only the job of writing the narrative —
+    not deriving any of the numbers itself."""
+
+    weaknesses_text = "\n".join(
+        f"- [{w['severity']}] {w['description']}"
+        for w in recommendation_payload.get("weaknesses", [])
+    ) or "(no significant weaknesses identified)"
+
+    actions_by_verdict: dict[str, list] = {}
+    for action in recommendation_payload.get("holding_actions", []):
+        actions_by_verdict.setdefault(action["verdict"], []).append(action)
+
+    def format_actions(verdict):
+        items = actions_by_verdict.get(verdict, [])
+        if not items:
+            return "(none)"
+        return "\n".join(
+            f"- {a['ticker']} ({a['weight'] * 100:.0f}% of portfolio): "
+            f"{' '.join(a['reasoning'])}"
+            for a in items
+        )
+
+    actions_text = (
+        f"SELL:\n{format_actions('sell')}\n\n"
+        f"REDUCE:\n{format_actions('reduce')}\n\n"
+        f"INCREASE:\n{format_actions('increase')}\n\n"
+        f"HOLD:\n{format_actions('hold')}"
+    )
+
+    alternatives_text = "\n".join(
+        f"- {a['candidate_ticker']} ({a['candidate_name']}) replacing "
+        f"{a.get('replaces_ticker') or 'N/A'}: {' '.join(a['rationale'])}"
+        for a in recommendation_payload.get("alternatives", [])
+    ) or "(none)"
+
+    diversification_text = "\n".join(
+        f"- {d['candidate_ticker']} ({d['candidate_name']}): {' '.join(d['rationale'])}"
+        for d in recommendation_payload.get("diversification_suggestions", [])
+    ) or "(none)"
+
+    comparison_text = "\n".join(
+        f"- {c['label']}: {c['current']:.4f} -> {c['recommended']:.4f} ({c['delta']:+.4f})"
+        for c in recommendation_payload.get("metrics_comparison", [])
+    ) or "(no comparison available)"
+
+    evidence_text = "\n".join(
+        f"- [{item['source_type']}, score={item['score']}] {item.get('title')}"
+        + (f" (page {item['page']})" if item.get("page") else "")
+        for item in ranked_evidence[:10]
+    ) or "(no evidence retrieved)"
+
+    return f"""
+User question: {user_query}
+
+Identified weaknesses:
+{weaknesses_text}
+
+Recommended actions by holding:
+{actions_text}
+
+Suggested alternative investments:
+{alternatives_text}
+
+Diversification suggestions:
+{diversification_text}
+
+Current vs. recommended portfolio metrics:
+{comparison_text}
+
+Ranked supporting evidence (highest-quality/most-relevant first):
+{evidence_text}
+
+Write a clear explanation covering: what's wrong with the current
+portfolio, why each recommended action is being suggested, and how the
+proposed changes could improve the portfolio. Separate short-term and
+long-term reasoning where relevant.
+
+Rules:
+- Do not invent numbers — use only the figures given above.
+- Distinguish confirmed structural/quantitative findings (weaknesses,
+  metrics) from evidence-based claims about individual companies.
+- For anything sourced from external news, use hedged language like
+  "may have contributed" — never state it "definitely caused" the
+  situation unless it's a directly calculated metric given above.
+- Cite which evidence supports each claim about a specific company.
+- This is analysis, not individualized financial advice — frame
+  recommendations as considerations, not instructions.
+- Write in plain prose paragraphs only — no markdown formatting (no #
+  headers, ** bold, | tables, or --- rules). This text is displayed as
+  plain text, not rendered markdown, so any markdown syntax would show
+  up as literal stray characters to the reader.
+- Start directly with the analysis — no preamble acknowledging these
+  instructions (e.g. don't open with "Here is a plain-prose explanation...").
+"""
+
+
+async def run_recommendation_workflow(
+    portfolio_id: int, user_query: str, session_id: str
+):
+    """The recommendation workflow, mirroring run_risk_explanation_workflow's
+    shape exactly: mostly-deterministic Python steps calling functions
+    directly (not through an LLM agent) for anything that's pure
+    computation, with only two real LLM calls total across the whole
+    workflow — Research (evidence for the most heavily-weighted flagged
+    holdings, capped at 3) and Synthesis (turning the already-computed
+    structured recommendation into a narrative). All scoring/comparison
+    math happens inside analytics.recommendation_engine.generate_recommendation
+    before either LLM call — see that module's own docstring for why."""
+
+    trace = []
+
+    async def emit(agent, event_type, message, data=None, tool=None):
+
+        event = {"type": event_type, "agent": agent, "message": message}
+
+        if tool:
+            event["tool"] = tool
+
+        if data is not None:
+            event["data"] = data
+
+        await emit_event(session_id, event)
+        trace.append(event)
+
+    def record(agent_name, tool_results, status="completed"):
+
+        persist_agent_run(
+            session_id, agent_name, tool_results,
+            status=status, started_at=datetime.now(timezone.utc)
+        )
+
+    empty_evidence = {"internal": [], "market": [], "external": []}
+
+    def empty_result(summary):
+        return {
+            "portfolio_id": portfolio_id,
+            "session_id": session_id,
+            "summary": summary,
+            "weaknesses": [],
+            "holding_actions": [],
+            "alternatives": [],
+            "diversification_suggestions": [],
+            "current_metrics": None,
+            "recommended_metrics": None,
+            "metrics_comparison": [],
+            "evidence": empty_evidence,
+            "sources": [],
+            "trace": trace,
+        }
+
+    # STEP 1 — Portfolio: get holdings
+    await emit("portfolio_agent", "agent_started", "Retrieving portfolio holdings")
+    holdings_result = get_portfolio_holdings(portfolio_id)
+    await emit(
+        "portfolio_agent", "agent_completed",
+        f"Retrieved {len(holdings_result.get('holdings', []))} holdings",
+        data=holdings_result
+    )
+    record("portfolio_agent", [{
+        "tool": "get_portfolio_holdings",
+        "args": {"portfolio_id": portfolio_id},
+        "result": holdings_result
+    }])
+
+    if not holdings_result.get("holdings"):
+        return empty_result(f"No holdings found for portfolio {portfolio_id}.")
+
+    # STEP 2 — Quant Engine (no LLM): weaknesses, per-holding verdicts,
+    # alternatives, and a full recommended-state comparison
+    await emit(
+        "recommendation_engine", "agent_started",
+        "Running quantitative portfolio analysis and scoring"
+    )
+
+    recommendation = generate_recommendation(portfolio_id)
+
+    if "error" in recommendation:
+        await emit("recommendation_engine", "agent_completed", recommendation["error"])
+        return empty_result(recommendation["error"])
+
+    record("recommendation_engine", [{
+        "tool": "generate_recommendation",
+        "args": {"portfolio_id": portfolio_id},
+        "result": {
+            "weaknesses_count": len(recommendation["weaknesses"]),
+            "holding_actions_count": len(recommendation["holding_actions"]),
+            "alternatives_count": len(recommendation["alternatives"]),
+        }
+    }])
+
+    actionable_count = sum(
+        1 for a in recommendation["holding_actions"] if a["verdict"] != "hold"
+    )
+
+    await emit(
+        "recommendation_engine", "agent_completed",
+        f"Identified {len(recommendation['weaknesses'])} weakness(es) and "
+        f"{actionable_count} actionable holding(s)",
+        data={
+            "weaknesses": recommendation["weaknesses"],
+            "holding_actions": recommendation["holding_actions"],
+        }
+    )
+
+    # STEP 3 — Research Agent (LLM, capped): evidence for only the
+    # most heavily-weighted flagged holdings, so this stays within
+    # Mistral's free-tier rate limits regardless of portfolio size
+    flagged = [
+        a for a in recommendation["holding_actions"] if a["verdict"] in ("reduce", "sell")
+    ]
+    flagged.sort(key=lambda a: a["weight"], reverse=True)
+    top_flagged = flagged[:3]
+
+    research_tool_results = []
+
+    if top_flagged:
+
+        await emit(
+            "research_agent", "agent_started",
+            f"Gathering supporting evidence for "
+            f"{', '.join(a['ticker'] for a in top_flagged)}"
+        )
+
+        for action in top_flagged:
+
+            company_info = get_company_details(action["ticker"])
+            company_name = company_info.get("name") or action["ticker"]
+
+            research_query = (
+                f"Investigate recent news, risk factors, and fundamentals "
+                f"relevant to whether {company_name} ({action['ticker']}) should be "
+                f"{'sold' if action['verdict'] == 'sell' else 'reduced'}, given: "
+                f"{' '.join(action['reasoning'])}"
+            )
+
+            try:
+                _, tool_results = await run_agent_with_retry(
+                    research_agent, research_query, session_id, trace
+                )
+                research_tool_results.extend(tool_results)
+            except Exception as e:
+                await emit(
+                    "research_agent", "error",
+                    f"research_agent failed for {action['ticker']}: {e.__class__.__name__}",
+                    data={"error": str(e)}
+                )
+
+        record(
+            "research_agent", research_tool_results,
+            status="completed" if research_tool_results else "failed"
+        )
+
+        await emit(
+            "research_agent", "agent_completed",
+            "Research complete",
+            data={"tool_results_count": len(research_tool_results)}
+        )
+
+    else:
+        await emit(
+            "research_agent", "agent_completed",
+            "No holdings flagged reduce/sell — skipping evidence gathering"
+        )
+
+    # STEP 4 — Evidence Ranker
+    await emit("evidence_ranker", "agent_started", "Ranking gathered evidence")
+
+    ranked_evidence = rank_evidence(build_evidence_items(research_tool_results))
+
+    evidence_bucket = {
+        "internal": [
+            e for e in ranked_evidence
+            if e["source_type"] in ("regulatory_filing", "internal_document")
+        ],
+        "market": [
+            e for e in ranked_evidence if e["source_type"] == "market_data"
+        ],
+        "external": [
+            e for e in ranked_evidence
+            if e["source_type"] in ("major_news", "general_news", "company_website")
+        ],
+    }
+
+    await emit(
+        "evidence_ranker", "agent_completed",
+        f"Ranked {len(ranked_evidence)} evidence sources",
+        data={"count": len(ranked_evidence)}
+    )
+
+    # STEP 5 — Synthesis Agent (LLM): narrative only, over the already-
+    # computed structured recommendation — never invents its own numbers
+    await emit(
+        "synthesis_agent", "agent_started",
+        "Generating recommendation narrative..."
+    )
+
+    synthesis_prompt = build_recommendation_prompt(user_query, recommendation, ranked_evidence)
+
+    try:
+        summary, _ = await run_agent_with_retry(
+            synthesis_agent, synthesis_prompt, session_id
+        )
+    except Exception as e:
+        summary = None
+        await emit(
+            "synthesis_agent", "error",
+            f"synthesis_agent failed: {e.__class__.__name__}",
+            data={"error": str(e)}
+        )
+
+    record(
+        "synthesis_agent", [],
+        status="completed" if summary is not None else "failed"
+    )
+
+    await emit("synthesis_agent", "agent_completed", "Synthesis complete")
+
+    # STEP 6 — Persist, so the dashboard can reload without recomputing
+    # and the chatbot can reference "the current recommendation" as context
+    db = SessionLocal()
+    try:
+        db.add(PortfolioRecommendation(
+            portfolio_id=portfolio_id,
+            session_id=session_id,
+            generated_at=datetime.now(timezone.utc),
+            status="completed" if summary is not None else "failed",
+            summary=summary or "",
+            payload=recommendation,
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    sources = [
+        {
+            "document": item.get("title"),
+            "page": item.get("page"),
+            "company": item.get("company"),
+        }
+        for item in evidence_bucket["internal"]
+    ]
+
+    result = {
+        "portfolio_id": portfolio_id,
+        "session_id": session_id,
+        "summary": summary,
+        "weaknesses": recommendation["weaknesses"],
+        "holding_actions": recommendation["holding_actions"],
+        "alternatives": recommendation["alternatives"],
+        "diversification_suggestions": recommendation["diversification_suggestions"],
+        "current_metrics": recommendation["current_metrics"],
+        "recommended_metrics": recommendation["recommended_metrics"],
+        "metrics_comparison": recommendation["metrics_comparison"],
+        "evidence": evidence_bucket,
+        "sources": sources,
+        "trace": trace,
+    }
+
+    await emit_event(session_id, {
+        "type": "final_result",
+        "agent": "synthesis_agent",
+        "message": "Recommendation analysis completed",
         "data": result
     })
 

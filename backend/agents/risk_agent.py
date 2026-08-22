@@ -10,7 +10,7 @@ from tools.risk_tools import (
 risk_agent = Agent(
     name="risk_agent",
 
-    model=LiteLlm(model="mistral/mistral-large-latest"),
+    model=LiteLlm(model="anthropic/claude-sonnet-5"),
 
     instruction="""
 You are a quantitative portfolio risk analyst.

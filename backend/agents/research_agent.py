@@ -15,7 +15,7 @@ from tools.market_tools import (
 research_agent = Agent(
     name="research_agent",
 
-    model=LiteLlm(model="mistral/mistral-large-latest"),
+    model=LiteLlm(model="anthropic/claude-sonnet-5"),
 
     instruction="""
 You are a financial research specialist.

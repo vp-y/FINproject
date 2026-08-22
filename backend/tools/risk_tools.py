@@ -1,13 +1,10 @@
 import numpy as np
-import pandas as pd
 from analytics.risk_metrics import (
     calculate_volatility,
     sharpe_ratio,
     historical_var,
 )
-from database.connection import SessionLocal
-from services.portfolio_service import get_holdings
-from services.market_service import get_stock_price, get_historical_returns
+from services.portfolio_returns_service import get_portfolio_returns_series
 from analytics.risk_contribution import calculate_risk_contribution
 
 
@@ -60,52 +57,19 @@ def analyze_portfolio_risk(
         Risk metrics, along with each holding's portfolio weight.
     """
 
-    db = SessionLocal()
+    series = get_portfolio_returns_series(portfolio_id)
 
-    try:
-        holdings = get_holdings(db, portfolio_id)
+    if "error" in series:
+        return series
 
-        if not holdings:
-            return {"error": f"No holdings found for portfolio {portfolio_id}."}
+    result = calculate_portfolio_risk(
+        list(series["portfolio_returns"])
+    )
 
-        weights = {}
-        returns_by_ticker = {}
-        total_value = 0.0
+    result["portfolio_id"] = portfolio_id
+    result["weights"] = series["weights"]
 
-        for holding in holdings:
-
-            price_info = get_stock_price(holding.ticker)
-            value = price_info["price"] * holding.quantity
-
-            total_value += value
-            weights[holding.ticker] = value
-            returns_by_ticker[holding.ticker] = get_historical_returns(holding.ticker)
-
-        for ticker in weights:
-            weights[ticker] = (
-                weights[ticker] / total_value if total_value else 0
-            )
-
-        # Align all tickers' return series onto a common date index
-        # (some tickers may be missing data on days others have it).
-        returns_df = pd.DataFrame(returns_by_ticker).fillna(0)
-
-        portfolio_returns = sum(
-            returns_df[ticker] * weight
-            for ticker, weight in weights.items()
-        )
-
-        result = calculate_portfolio_risk(
-            list(portfolio_returns)
-        )
-
-        result["portfolio_id"] = portfolio_id
-        result["weights"] = weights
-
-        return result
-
-    finally:
-        db.close()
+    return result
 
 
 def analyze_risk_contribution(
@@ -125,56 +89,37 @@ def analyze_risk_contribution(
         Each ticker's share of total portfolio risk (sums to ~1.0).
     """
 
-    db = SessionLocal()
+    series = get_portfolio_returns_series(portfolio_id)
 
-    try:
-        holdings = get_holdings(db, portfolio_id)
+    if "error" in series:
+        return series
 
-        if not holdings:
-            return {"error": f"No holdings found for portfolio {portfolio_id}."}
+    weights = series["weights"]
+    returns_df = series["returns_df"]
 
-        tickers = [h.ticker for h in holdings]
+    # Sourced from the weights dict (built in holdings order, deduped by
+    # ticker) rather than the raw holdings list directly — equivalent for
+    # portfolios without a duplicated ticker across multiple rows, which
+    # is the only case this application actually produces today.
+    tickers = list(weights.keys())
 
-        weights = {}
-        returns_by_ticker = {}
-        total_value = 0.0
+    weights_array = np.array([weights[t] for t in tickers])
+    # annualized covariance, matching calculate_volatility's *sqrt(252)
+    covariance_matrix = returns_df[tickers].cov().values * 252
 
-        for holding in holdings:
+    contribution = calculate_risk_contribution(
+        weights_array,
+        covariance_matrix
+    )
 
-            price_info = get_stock_price(holding.ticker)
-            value = price_info["price"] * holding.quantity
+    total_contribution = contribution.sum()
 
-            total_value += value
-            weights[holding.ticker] = value
-            returns_by_ticker[holding.ticker] = get_historical_returns(holding.ticker)
+    contribution_pct = {
+        ticker: float(value / total_contribution) if total_contribution else 0.0
+        for ticker, value in zip(tickers, contribution)
+    }
 
-        for ticker in weights:
-            weights[ticker] = (
-                weights[ticker] / total_value if total_value else 0
-            )
-
-        returns_df = pd.DataFrame(returns_by_ticker).fillna(0)
-
-        weights_array = np.array([weights[t] for t in tickers])
-        # annualized covariance, matching calculate_volatility's *sqrt(252)
-        covariance_matrix = returns_df[tickers].cov().values * 252
-
-        contribution = calculate_risk_contribution(
-            weights_array,
-            covariance_matrix
-        )
-
-        total_contribution = contribution.sum()
-
-        contribution_pct = {
-            ticker: float(value / total_contribution) if total_contribution else 0.0
-            for ticker, value in zip(tickers, contribution)
-        }
-
-        return {
-            "portfolio_id": portfolio_id,
-            "contribution": contribution_pct,
-        }
-
-    finally:
-        db.close()
+    return {
+        "portfolio_id": portfolio_id,
+        "contribution": contribution_pct,
+    }

@@ -11,6 +11,7 @@ class AgentTask(BaseModel):
         "risk",
         "research",
         "scenario",
+        "recommendation",
         "combined",
     ]
 

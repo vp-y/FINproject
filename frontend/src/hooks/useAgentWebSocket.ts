@@ -32,8 +32,11 @@ export function useAgentWebSocket() {
     const id = crypto.randomUUID();
     setSessionId(id);
 
+    const wsBase =
+      process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000";
+
     const socket = new WebSocket(
-      `ws://localhost:8000/ws/agents/${id}`
+      `${wsBase}/ws/agents/${id}`
     );
 
     socket.onopen = () => {

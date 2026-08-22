@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 import requests
-from sec_cik_mapper import StockMapper
+from data_pipeline.stock_mapper import mapper as _mapper
 
 # data/documents/ lives at the project root, not under backend/ — anchor
 # to this file's location so it resolves correctly regardless of the
@@ -15,8 +15,6 @@ DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "documents"
 SEC_HEADERS = {
     "User-Agent": "Aegis Research Project research@aegis.local"
 }
-
-_mapper = StockMapper()
 
 
 def get_10k_url(ticker):

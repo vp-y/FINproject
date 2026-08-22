@@ -22,6 +22,11 @@ RESEARCH_KEYWORDS = [
     "background", "tell me about", "what data"
 ]
 SCENARIO_KEYWORDS = ["what if", "scenario", "stress test", "rate hike", "shock", "crash"]
+RECOMMENDATION_KEYWORDS = [
+    "recommend", "should i", "sell", "reduce", "increase exposure",
+    "rebalance", "buy more", "hold or sell", "improve my portfolio",
+    "what should i do", "alternative",
+]
 
 
 def classify_query_type(query: str) -> str:
@@ -34,11 +39,19 @@ def classify_query_type(query: str) -> str:
     q = query.lower()
 
     wants_scenario = any(kw in q for kw in SCENARIO_KEYWORDS)
+    wants_recommendation = any(kw in q for kw in RECOMMENDATION_KEYWORDS)
     wants_risk = any(kw in q for kw in RISK_KEYWORDS)
     wants_research = any(kw in q for kw in RESEARCH_KEYWORDS)
 
     if wants_scenario:
         return "scenario"
+
+    if wants_recommendation:
+        # Checked before "risk" so "should I sell because of the risk"
+        # routes to the recommendation workflow, not the plain risk one —
+        # the recommendation workflow already runs its own quant risk
+        # analysis internally, so nothing risk-specific is lost.
+        return "recommendation"
 
     if wants_risk:
         # The "risk" workflow (Step 5.13) already runs its own internal

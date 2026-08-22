@@ -9,7 +9,7 @@ from tools.scenario_tools import (
 scenario_agent = Agent(
     name="scenario_agent",
 
-    model=LiteLlm(model="mistral/mistral-large-latest"),
+    model=LiteLlm(model="anthropic/claude-sonnet-5"),
 
     instruction="""
 You are a portfolio scenario analysis specialist.

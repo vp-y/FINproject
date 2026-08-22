@@ -1,8 +1,8 @@
 "use client";
 
 import type { Evidence } from "@/components/EvidencePanel";
-import { deltaTone, formatSignedNumber, formatSignedPercent, type Tone } from "@/lib/format";
-import { Card, EmptyState } from "@/components/ui";
+import { deltaTone, formatSignedNumber, formatSignedPercent } from "@/lib/format";
+import { Card, EmptyState, StatTile } from "@/components/ui";
 
 export type AnalyzeResponse = {
   portfolio_id: number | null;
@@ -24,35 +24,6 @@ export type AnalyzeResponse = {
     page?: number;
   }[];
 };
-
-const toneText: Record<Tone, string> = {
-  good: "text-[var(--good)]",
-  warning: "text-[var(--warning)]",
-  critical: "text-[var(--critical)]",
-  neutral: "text-[var(--ink)]",
-};
-
-function StatTile({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone: Tone;
-}) {
-
-  return (
-    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-4 py-3">
-      <p className="text-xs text-[var(--ink-3)]">
-        {label}
-      </p>
-      <p className={`text-lg font-semibold tabular-nums ${toneText[tone]}`}>
-        {value}
-      </p>
-    </div>
-  );
-}
 
 export default function AnalysisResult({
   result,

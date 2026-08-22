@@ -7,6 +7,9 @@ from api import rag
 from api import data_pipeline
 from api import agents
 from api import websocket
+from api import onboarding
+from api import recommendations
+from api import chat
 
 
 app = FastAPI(
@@ -42,6 +45,15 @@ app.include_router(
 )
 app.include_router(
     websocket.router
+)
+app.include_router(
+    onboarding.router
+)
+app.include_router(
+    recommendations.router
+)
+app.include_router(
+    chat.router
 )
 
 

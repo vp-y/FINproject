@@ -9,7 +9,7 @@ from tools.portfolio_tools import (
 portfolio_agent = Agent(
     name="portfolio_agent",
 
-    model=LiteLlm(model="mistral/mistral-large-latest"),
+    model=LiteLlm(model="anthropic/claude-sonnet-5"),
 
     instruction="""
 You are a portfolio intelligence specialist.

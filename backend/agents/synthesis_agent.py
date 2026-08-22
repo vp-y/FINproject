@@ -4,7 +4,7 @@ from google.adk.models.lite_llm import LiteLlm
 synthesis_agent = Agent(
     name="synthesis_agent",
 
-    model=LiteLlm(model="mistral/mistral-large-latest"),
+    model=LiteLlm(model="anthropic/claude-sonnet-5"),
 
     instruction="""
 You are an investment intelligence synthesis agent.

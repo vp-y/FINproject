@@ -11,6 +11,11 @@ class AgentEvent(BaseModel):
         "tool_completed",
         "error",
         "final_result",
+        # Onboarding document-collection progress (services/onboarding_service.py)
+        "document_fetch_started",
+        "document_indexed",
+        "document_failed",
+        "onboarding_completed",
     ]
 
     agent: Optional[str] = None
